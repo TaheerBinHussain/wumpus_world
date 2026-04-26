@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dynamic Wumpus Logic Agent</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; background: #f5f5f5; color: #222; padding: 20px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 4px; color: #1a1a2e; }
+  p.sub { font-size: 13px; color: #666; margin-bottom: 16px; }
+
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  .controls label { font-size: 13px; color: #555; }
+  .controls input[type=number] { width: 56px; padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+  .controls button { padding: 7px 16px; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; }
+  .controls button:hover { background: #eee; }
+  .controls button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+  .controls button.primary:hover { background: #1558b0; }
+  .controls button.warn { background: #e8a21a; color: #fff; border-color: #e8a21a; }
+
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  .leg { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #555; }
+  .leg-box { width: 14px; height: 14px; border-radius: 3px; border: 1px solid #ccc; }
+
+  #grid-wrap { display: inline-block; border: 1px solid #ccc; border-radius: 8px; overflow: hidden; margin-bottom: 16px; background: #fff; }
+  .grid { display: grid; }
+  .cell { width: 70px; height: 70px; border: 0.5px solid #ddd; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; position: relative; transition: background 0.2s; }
+  .cell.unknown { background: #f0f0f0; }
+  .cell.safe { background: #e6f4ea; }
+  .cell.danger { background: #fce8e6; }
+  .cell.agent { background: #e8f0fe; }
+  .cell .icon { font-size: 22px; line-height: 1; }
+  .cell .clabel { font-size: 10px; color: #777; margin-top: 2px; }
+  .cell .percept { font-size: 9px; color: #999; position: absolute; bottom: 3px; width: 100%; text-align: center; }
+  .cell .coord { font-size: 9px; color: #bbb; position: absolute; top: 2px; right: 4px; }
+
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+  .metric { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px 14px; }
+  .metric .mlabel { font-size: 12px; color: #888; margin-bottom: 4px; }
+  .metric .mval { font-size: 22px; font-weight: 600; color: #1a1a2e; }
+
+  #log { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; height: 140px; overflow-y: auto; font-size: 12px; color: #555; line-height: 1.9; }
+  #log .entry { border-bottom: 0.5px solid #f0f0f0; }
+
+  .kb-section { margin-top: 16px; }
+  .kb-section h3 { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #333; }
+  #kb-display { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; max-height: 120px; overflow-y: auto; font-size: 12px; color: #444; line-height: 1.8; font-family: monospace; }
+
+  .status-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .badge { padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+  .badge.running { background: #e6f4ea; color: #137333; }
+  .badge.stopped { background: #f0f0f0; color: #666; }
+  .badge.gameover { background: #fce8e6; color: #c5221f; }
+  .badge.win { background: #e8f0fe; color: #1a73e8; }
+</style>
+</head>
+<body>
+
+<h1>🧠 Dynamic Wumpus Logic Agent</h1>
+<p class="sub">Knowledge-Based Agent using Propositional Logic & Resolution Refutation — FAST NUCES Assignment</p>
+
+<div class="controls">
+  <label>Rows:</label>
+  <input type="number" id="rows" value="4" min="3" max="7">
+  <label>Cols:</label>
+  <input type="number" id="cols" value="4" min="3" max="7">
+  <button class="primary" onclick="initGame()">🔄 New Game</button>
+  <button onclick="agentStep()">👣 Step</button>
+  <button class="warn" onclick="toggleAuto()" id="auto-btn">▶ Auto Run</button>
+</div>
+
+<div class="status-bar">
+  <span>Status:</span>
+  <span class="badge stopped" id="status-badge">Idle</span>
+</div>
+
+<div class="legend">
+  <div class="leg"><div class="leg-box" style="background:#e8f0fe"></div>Agent 🤖</div>
+  <div class="leg"><div class="leg-box" style="background:#e6f4ea"></div>Safe ✓</div>
+  <div class="leg"><div class="leg-box" style="background:#f0f0f0"></div>Unknown ?</div>
+  <div class="leg"><div class="leg-box" style="background:#fce8e6"></div>Danger ⚠</div>
+</div>
+
+<div id="grid-wrap"><div class="grid" id="grid"></div></div>
+
+<div class="metrics">
+  <div class="metric"><div class="mlabel">Inference Steps</div><div class="mval" id="m-steps">0</div></div>
+  <div class="metric"><div class="mlabel">Cells Visited</div><div class="mval" id="m-visited">0</div></div>
+  <div class="metric"><div class="mlabel">Current Percepts</div><div class="mval" id="m-percepts" style="font-size:16px">—</div></div>
+</div>
+
+<h3 style="font-size:14px;font-weight:600;margin-bottom:8px;color:#333;">📋 Inference Log</h3>
+<div id="log"></div>
+
+<div class="kb-section">
+  <h3>🗃️ Knowledge Base (CNF Clauses)</h3>
+  <div id="kb-display">KB is empty. Start the game.</div>
+</div>
+
+<script>
+let ROWS = 4, COLS = 4;
+let pits = [], wumpus = null, gold = null;
+let agent = { r: 0, c: 0 };
+let visited = new Set();
+let KB = {};
+let cnfClauses = [];
+let inferenceSteps = 0;
+let autoTimer = null;
+let gameOver = false;
+
+function rc(r, c) { return r + ',' + c; }
+function inBounds(r, c) { return r >= 0 && r < ROWS && c >= 0 && c < COLS; }
+function neighbors(r, c) {
+  return [[r-1,c],[r+1,c],[r,c-1],[r,c+1]].filter(([a,b]) => inBounds(a,b));
+}
+
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    let j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+}
+
+function ispit(r, c) { return pits.some(([a,b]) => a===r && b===c); }
+function iswumpus(r, c) { return wumpus && wumpus[0]===r && wumpus[1]===c; }
+function isgold(r, c) { return gold && gold[0]===r && gold[1]===c; }
+
+function initGame() {
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  ROWS = parseInt(document.getElementById('rows').value) || 4;
+  COLS = parseInt(document.getElementById('cols').value) || 4;
+  pits = []; wumpus = null; gold = null;
+  KB = {}; cnfClauses = []; inferenceSteps = 0;
+  agent = { r: ROWS - 1, c: 0 };
+  visited = new Set();
+  gameOver = false;
+
+  document.getElementById('m-steps').textContent = '0';
+  document.getElementById('m-visited').textContent = '0';
+  document.getElementById('m-percepts').textContent = '—';
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('kb-display').textContent = 'KB loading...';
+  setStatus('running');
+  document.getElementById('auto-btn').textContent = '▶ Auto Run';
+
+  let cells = [];
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (!(r === ROWS-1 && c === 0)) cells.push([r, c]);
+  shuffle(cells);
+
+  let numPits = Math.max(1, Math.floor(ROWS * COLS * 0.18));
+  for (let i = 0; i < numPits && i < cells.length; i++) pits.push(cells[i]);
+  if (cells[numPits]) wumpus = cells[numPits];
+  if (cells[numPits + 1]) gold = cells[numPits + 1];
+
+  addKBClause('START: Agent at (' + agent.r + ',' + agent.c + ') — Safe_' + agent.r + '_' + agent.c);
+  perceiveAndUpdate();
+  renderGrid();
+  addLog('🚀 New game started! Grid: ' + ROWS + 'x' + COLS + '. Agent at (' + agent.r + ',' + agent.c + ').');
+}
+
+function perceiveAndUpdate() {
+  let k = rc(agent.r, agent.c);
+  visited.add(k);
+  let percepts = [];
+  let hasBreeze = neighbors(agent.r, agent.c).some(([r,c]) => ispit(r, c));
+  let hasStench = neighbors(agent.r, agent.c).some(([r,c]) => iswumpus(r, c));
+  if (hasBreeze) percepts.push('Breeze');
+  if (hasStench) percepts.push('Stench');
+  if (isgold(agent.r, agent.c)) percepts.push('Glitter ✨');
+  KB[k] = { breeze: hasBreeze, stench: hasStench, safe: true, percepts };
+
+  if (hasBreeze) {
+    let clause = 'B_' + agent.r + '_' + agent.c + ' ⟺ (';
+    clause += neighbors(agent.r, agent.c).map(([r,c]) => 'P_'+r+'_'+c).join(' ∨ ') + ')';
+    addKBClause(clause);
+  }
+  if (hasStench) {
+    let clause = 'S_' + agent.r + '_' + agent.c + ' ⟺ (';
+    clause += neighbors(agent.r, agent.c).map(([r,c]) => 'W_'+r+'_'+c).join(' ∨ ') + ')';
+    addKBClause(clause);
+  }
+  if (!hasBreeze && !hasStench) {
+    addKBClause('¬B_' + agent.r + '_' + agent.c + ' ∧ ¬S_' + agent.r + '_' + agent.c + ' → Safe(all neighbors)');
+  }
+
+  document.getElementById('m-percepts').textContent = percepts.length ? percepts.join(', ') : 'Clear';
+  inferAndMark();
+}
+
+function inferAndMark() {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let [k, data] of Object.entries(KB)) {
+      if (!data.safe) continue;
+      let [r, c] = k.split(',').map(Number);
+
+      if (!data.breeze && !data.stench) {
+        for (let [nr, nc] of neighbors(r, c)) {
+          let nk = rc(nr, nc);
+          if (!KB[nk]) {
+            KB[nk] = { safe: true, inferredSafe: true };
+            inferenceSteps++;
+            changed = true;
+            addLog('✅ Resolution: (' + nr + ',' + nc + ') proved SAFE — no percepts at (' + r + ',' + c + ')');
+            addKBClause('¬P_'+nr+'_'+nc+' ∧ ¬W_'+nr+'_'+nc+' [proved via resolution from (' + r + ',' + c + ')]');
+          } else if (!KB[nk].safe && !KB[nk].danger) {
+            KB[nk].safe = true;
+            inferenceSteps++;
+            changed = true;
+          }
+        }
+      }
+
+      if (data.breeze) {
+        let unknownN = neighbors(r, c).filter(([nr,nc]) => !visited.has(rc(nr,nc)));
+        if (unknownN.length === 1) {
+          let [nr, nc] = unknownN[0];
+          let nk = rc(nr, nc);
+          if (!KB[nk] || (!KB[nk].danger)) {
+            KB[nk] = { safe: false, danger: 'pit' };
+            inferenceSteps++;
+            changed = true;
+            addLog('⚠️ Resolution: (' + nr + ',' + nc + ') — PIT inferred (only unknown breeze-neighbor of (' + r + ',' + c + '))');
+            addKBClause('P_'+nr+'_'+nc+' [derived by resolution refutation]');
+          }
+        }
+      }
+
+      if (data.stench) {
+        let unknownN = neighbors(r, c).filter(([nr,nc]) => !visited.has(rc(nr,nc)));
+        if (unknownN.length === 1) {
+          let [nr, nc] = unknownN[0];
+          let nk = rc(nr, nc);
+          if (!KB[nk] || (!KB[nk].danger)) {
+            KB[nk] = { safe: false, danger: 'wumpus' };
+            inferenceSteps++;
+            changed = true;
+            addLog('👾 Resolution: (' + nr + ',' + nc + ') — WUMPUS inferred (only unknown stench-neighbor of (' + r + ',' + c + '))');
+            addKBClause('W_'+nr+'_'+nc+' [derived by resolution refutation]');
+          }
+        }
+      }
+    }
+  }
+  document.getElementById('m-steps').textContent = inferenceSteps;
+  document.getElementById('m-visited').textContent = visited.size;
+}
+
+function agentStep() {
+  if (gameOver) { addLog('Game is over. Start a new game.'); return; }
+
+  if (ispit(agent.r, agent.c)) { addLog('💀 Agent fell into a PIT! Game over.'); setStatus('gameover'); gameOver = true; if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } return; }
+  if (iswumpus(agent.r, agent.c)) { addLog('💀 Agent eaten by WUMPUS! Game over.'); setStatus('gameover'); gameOver = true; if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } return; }
+  if (isgold(agent.r, agent.c)) { addLog('🏆 GOLD FOUND! Agent wins!'); setStatus('win'); gameOver = true; if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } return; }
+
+  let safeAdjacent = [];
+  for (let [nr, nc] of neighbors(agent.r, agent.c)) {
+    let nk = rc(nr, nc);
+    if (!visited.has(nk) && KB[nk] && KB[nk].safe) safeAdjacent.push([nr, nc]);
+  }
+
+  if (safeAdjacent.length > 0) {
+    agent = { r: safeAdjacent[0][0], c: safeAdjacent[0][1] };
+  } else {
+    let safeAnywhere = [];
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++) {
+        let k = rc(r, c);
+        if (!visited.has(k) && KB[k] && KB[k].safe) safeAnywhere.push([r, c]);
+      }
+    if (safeAnywhere.length === 0) {
+      addLog('🔍 No safe unvisited cells found. Exploration complete!');
+      setStatus('stopped');
+      if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+      return;
+    }
+    agent = { r: safeAnywhere[0][0], c: safeAnywhere[0][1] };
+  }
+
+  addLog('🤖 Agent moves to (' + agent.r + ',' + agent.c + ')');
+  perceiveAndUpdate();
+  renderGrid();
+
+  if (isgold(agent.r, agent.c)) { addLog('🏆 GOLD FOUND! Agent wins!'); setStatus('win'); gameOver = true; if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } }
+  if (ispit(agent.r, agent.c)) { addLog('💀 Agent fell into a PIT!'); setStatus('gameover'); gameOver = true; if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } }
+  if (iswumpus(agent.r, agent.c)) { addLog('💀 Wumpus got the agent!'); setStatus('gameover'); gameOver = true; if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } }
+}
+
+function toggleAuto() {
+  if (autoTimer) {
+    clearInterval(autoTimer);
+    autoTimer = null;
+    document.getElementById('auto-btn').textContent = '▶ Auto Run';
+  } else {
+    document.getElementById('auto-btn').textContent = '⏹ Stop';
+    autoTimer = setInterval(() => { agentStep(); }, 700);
+  }
+}
+
+function renderGrid() {
+  let g = document.getElementById('grid');
+  g.style.gridTemplateColumns = 'repeat(' + COLS + ', 70px)';
+  g.innerHTML = '';
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      let div = document.createElement('div');
+      div.className = 'cell';
+      let k = rc(r, c);
+      let isAgent = agent.r === r && agent.c === c;
+      let kbEntry = KB[k];
+      let icon = '', lbl = '', pcpt = '';
+      if (isAgent) {
+        div.classList.add('agent'); icon = '🤖'; lbl = 'agent';
+      } else if (kbEntry && kbEntry.safe === false) {
+        div.classList.add('danger');
+        icon = kbEntry.danger === 'pit' ? '🕳️' : '👾';
+        lbl = kbEntry.danger;
+      } else if (visited.has(k)) {
+        div.classList.add('safe');
+        if (isgold(r, c)) icon = '✨';
+        if (kbEntry && kbEntry.percepts && kbEntry.percepts.length) pcpt = kbEntry.percepts.join(' ');
+      } else if (kbEntry && kbEntry.safe) {
+        div.classList.add('safe'); icon = '✓'; lbl = 'safe';
+      } else {
+        div.classList.add('unknown'); icon = '?';
+      }
+      div.innerHTML =
+        '<div class="coord">(' + r + ',' + c + ')</div>' +
+        '<div class="icon">' + icon + '</div>' +
+        '<div class="clabel">' + lbl + '</div>' +
+        '<div class="percept">' + pcpt + '</div>';
+      g.appendChild(div);
+    }
+  }
+}
+
+function addLog(msg) {
+  let el = document.getElementById('log');
+  let line = document.createElement('div');
+  line.className = 'entry';
+  line.textContent = msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function addKBClause(clause) {
+  cnfClauses.push(clause);
+  let el = document.getElementById('kb-display');
+  el.textContent = cnfClauses.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(s) {
+  let b = document.getElementById('status-badge');
+  b.className = 'badge ' + s;
+  b.textContent = s === 'running' ? 'Running' : s === 'gameover' ? 'Game Over' : s === 'win' ? 'Agent Won!' : 'Stopped';
+}
+
+initGame();
+</script>
+</body>
+</html>
